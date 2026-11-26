@@ -2,140 +2,156 @@ package com.example.digitalspeedometer
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.Gravity
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import android.widget.LinearLayout
+import android.widget.TextView
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.net.URLEncoder
+import kotlin.concurrent.thread
 import kotlin.math.roundToInt
 
-class MainActivity : ComponentActivity() {
+class MainActivity : Activity() {
+
+    private lateinit var speedTextView: TextView
+    private lateinit var limitTextView: TextView
+    private var speedLimitKmh: Int? = null
+    private var lastApiFetchTime: Long = 0L
+    private var locationManager: LocationManager? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        setContent {
-            MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF0D0D0D)
-                ) {
-                    SpeedometerScreen()
-                }
-            }
+        // Fő elrendezés (fekvő, fekete háttér)
+        val rootLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Color.parseColor("#0D0D0D"))
+            gravity = Gravity.CENTER
+            setPadding(48, 48, 48, 48)
         }
-    }
-}
 
-@Composable
-fun SpeedometerScreen() {
-    val context = LocalContext.current
-    var hasLocationPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        )
+        // Bal oldal: Aktuális sebesség
+        val leftLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        speedTextView = TextView(this).apply {
+            text = "0"
+            textSize = 150f
+            setTextColor(Color.WHITE)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+
+        val unitTextView = TextView(this).apply {
+            text = "km/h"
+            textSize = 28f
+            setTextColor(Color.GRAY)
+            gravity = Gravity.CENTER
+        }
+
+        leftLayout.addView(speedTextView)
+        leftLayout.addView(unitTextView)
+
+        // Jobb oldal: Sebességhatár tábla
+        val rightLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val signDrawable = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.WHITE)
+            setStroke(36, Color.parseColor("#D50000"))
+        }
+
+        limitTextView = TextView(this).apply {
+            text = "--"
+            textSize = 64f
+            setTextColor(Color.BLACK)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            background = signDrawable
+            layoutParams = LinearLayout.LayoutParams(360, 360)
+        }
+
+        val limitLabelView = TextView(this).apply {
+            text = "Sebességhatár"
+            textSize = 20f
+            setTextColor(Color.GRAY)
+            gravity = Gravity.CENTER
+            setPadding(0, 24, 0, 0)
+        }
+
+        rightLayout.addView(limitTextView)
+        rightLayout.addView(limitLabelView)
+
+        rootLayout.addView(leftLayout)
+        rootLayout.addView(rightLayout)
+        setContentView(rootLayout)
+
+        checkLocationPermission()
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-    }
-
-    LaunchedEffect(Unit) {
-        if (!hasLocationPermission) {
-            permissionLauncher.launch(
+    private fun checkLocationPermission() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,
                     Manifest.permission.ACCESS_COARSE_LOCATION
-                )
+                ),
+                1001
             )
+        } else {
+            startGpsTracking()
         }
     }
 
-    if (!hasLocationPermission) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "A sebességméréshez GPS engedély szükséges.",
-                color = Color.White,
-                fontSize = 22.sp
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = {
-                permissionLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    )
-                )
-            }) {
-                Text("Engedély megadása", fontSize = 18.sp)
-            }
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            startGpsTracking()
         }
-    } else {
-        ActiveSpeedometer()
     }
-}
 
-@SuppressLint("MissingPermission")
-@Composable
-fun ActiveSpeedometer() {
-    val context = LocalContext.current
-    var currentSpeedKmh by remember { mutableIntStateOf(0) }
-    var speedLimitKmh by remember { mutableStateOf<Int?>(null) }
-    var currentCoords by remember { mutableStateOf<Pair<Double, Double>?>(null) }
-    var lastApiFetchTime by remember { mutableLongStateOf(0L) }
-
-    // Beépített Android LocationManager használata külső Google Play Services nélkül
-    DisposableEffect(Unit) {
-        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val locationListener = object : LocationListener {
+    @SuppressLint("MissingPermission")
+    private fun startGpsTracking() {
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                val speed = if (location.hasSpeed()) {
+                val currentSpeedKmh = if (location.hasSpeed()) {
                     (location.speed * 3.6f).roundToInt()
                 } else {
                     0
                 }
-                currentSpeedKmh = speed
-                currentCoords = Pair(location.latitude, location.longitude)
+                updateSpeedUI(currentSpeedKmh)
+
+                val now = System.currentTimeMillis()
+                if (now - lastApiFetchTime > 8000L) {
+                    lastApiFetchTime = now
+                    fetchSpeedLimitFromOSM(location.latitude, location.longitude)
+                }
             }
+
             @Deprecated("Deprecated in Java")
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
             override fun onProviderEnabled(provider: String) {}
@@ -143,127 +159,64 @@ fun ActiveSpeedometer() {
         }
 
         try {
-            locationManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                500L,
-                0f,
-                locationListener
-            )
+            locationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 500L, 0f, listener)
         } catch (e: Exception) {
             e.printStackTrace()
         }
-
-        onDispose {
-            locationManager.removeUpdates(locationListener)
-        }
     }
 
-    LaunchedEffect(currentCoords) {
-        val coords = currentCoords ?: return@LaunchedEffect
-        val now = System.currentTimeMillis()
-        if (now - lastApiFetchTime > 8000L) {
-            lastApiFetchTime = now
-            val fetchedLimit = fetchSpeedLimitFromOSM(coords.first, coords.second)
-            if (fetchedLimit != null) {
-                speedLimitKmh = fetchedLimit
-            }
-        }
-    }
-
-    val speedColor = remember(currentSpeedKmh, speedLimitKmh) {
+    private fun updateSpeedUI(currentSpeedKmh: Int) {
+        speedTextView.text = currentSpeedKmh.toString()
         val limit = speedLimitKmh
-        when {
-            limit == null || limit <= 0 -> Color.White
-            currentSpeedKmh <= limit -> Color(0xFF00E676)
-            currentSpeedKmh <= limit * 1.10 -> Color(0xFFFFD600)
-            else -> Color(0xFFFF1744)
+        val color = when {
+            limit == null || limit <= 0 -> Color.WHITE
+            currentSpeedKmh <= limit -> Color.parseColor("#00E676") // ZÖLD
+            currentSpeedKmh <= limit * 1.10 -> Color.parseColor("#FFD600") // SÁRGA (1-10%)
+            else -> Color.parseColor("#FF1744") // PIROS (10% felett)
         }
+        speedTextView.setTextColor(color)
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceEvenly
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = currentSpeedKmh.toString(),
-                color = speedColor,
-                fontSize = 180.sp,
-                fontWeight = FontWeight.Bold,
-                lineHeight = 180.sp
-            )
-            Text(
-                text = "km/h",
-                color = Color.Gray,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Medium
-            )
-        }
+    private fun fetchSpeedLimitFromOSM(lat: Double, lon: Double) {
+        thread {
+            try {
+                val client = OkHttpClient()
+                val query = """[out:json];way(around:35,$lat,$lon)["maxspeed"];out tags;"""
+                val encodedQuery = URLEncoder.encode(query, "UTF-8")
+                val url = "https://overpass-api.de"
 
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(180.dp)
-                    .background(Color.White, shape = CircleShape)
-                    .border(width = 18.dp, color = Color(0xFFD50000), shape = CircleShape)
-            ) {
-                Text(
-                    text = speedLimitKmh?.toString() ?: "--",
-                    color = Color.Black,
-                    fontSize = 64.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "Sebességhatár",
-                color = Color.Gray,
-                fontSize = 20.sp
-            )
-        }
-    }
-}
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "AndroidDigitalSpeedometerApp/1.0")
+                    .build()
 
-suspend fun fetchSpeedLimitFromOSM(lat: Double, lon: Double): Int? = withContext(Dispatchers.IO) {
-    try {
-        val client = OkHttpClient()
-        val query = """[out:json];way(around:35,$lat,$lon)["maxspeed"];out tags;"""
-        val encodedQuery = URLEncoder.encode(query, "UTF-8")
-        val url = "https://overpass-api.de"
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use
+                    val body = response.body?.string() ?: return@use
+                    val json = JSONObject(body)
+                    val elements = json.getJSONArray("elements")
 
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "AndroidDigitalSpeedometerApp/1.0")
-            .build()
-
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return@withContext null
-            val body = response.body?.string() ?: return@withContext null
-            val json = JSONObject(body)
-            val elements = json.getJSONArray("elements")
-
-            if (elements.length() > 0) {
-                val tags = elements.getJSONObject(0).getJSONObject("tags")
-                val maxSpeedStr = tags.optString("maxspeed", "")
-                return@withContext when {
-                    maxSpeedStr.toIntOrNull() != null -> maxSpeedStr.toInt()
-                    maxSpeedStr.contains("urban") -> 50
-                    maxSpeedStr.contains("rural") -> 90
-                    maxSpeedStr.contains("motorway") -> 130
-                    else -> null
+                    if (elements.length() > 0) {
+                        val tags = elements.getJSONObject(0).getJSONObject("tags")
+                        val maxSpeedStr = tags.optString("maxspeed", "")
+                        val parsedLimit = when {
+                            maxSpeedStr.toIntOrNull() != null -> maxSpeedStr.toInt()
+                            maxSpeedStr.contains("urban") -> 50
+                            maxSpeedStr.contains("rural") -> 90
+                            maxSpeedStr.contains("motorway") -> 130
+                            else -> null
+                        }
+                        if (parsedLimit != null) {
+                            speedLimitKmh = parsedLimit
+                            mainHandler.post {
+                                limitTextView.text = parsedLimit.toString()
+                            }
+                        }
+                    }
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
-    } catch (e: Exception) {
-        e.printStackTrace()
     }
-    return@withContext null
 }
