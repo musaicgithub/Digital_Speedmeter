@@ -4,26 +4,31 @@ plugins {
 }
 
 android {
-    namespace = "com.example.digitalspeedometer"
+    namespace = "hu.sebessegmero.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.digitalspeedometer"
+        applicationId = "hu.sebessegmero.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
     }
 
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
         jvmTarget = "17"
     }
 }
 
-dependencies {
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-}
+// Szándékosan nincs külső függőség: csak a natív Android SDK-t használjuk.
