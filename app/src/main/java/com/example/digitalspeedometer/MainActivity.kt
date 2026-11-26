@@ -38,7 +38,6 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Fő elrendezés (fekvő, fekete háttér)
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Color.parseColor("#0D0D0D"))
@@ -46,7 +45,6 @@ class MainActivity : Activity() {
             setPadding(48, 48, 48, 48)
         }
 
-        // Bal oldal: Aktuális sebesség
         val leftLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -71,7 +69,6 @@ class MainActivity : Activity() {
         leftLayout.addView(speedTextView)
         leftLayout.addView(unitTextView)
 
-        // Jobb oldal: Sebességhatár tábla
         val rightLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -170,9 +167,9 @@ class MainActivity : Activity() {
         val limit = speedLimitKmh
         val color = when {
             limit == null || limit <= 0 -> Color.WHITE
-            currentSpeedKmh <= limit -> Color.parseColor("#00E676") // ZÖLD
-            currentSpeedKmh <= limit * 1.10 -> Color.parseColor("#FFD600") // SÁRGA (1-10%)
-            else -> Color.parseColor("#FF1744") // PIROS (10% felett)
+            currentSpeedKmh <= limit -> Color.parseColor("#00E676")
+            currentSpeedKmh <= limit * 1.10 -> Color.parseColor("#FFD600")
+            else -> Color.parseColor("#FF1744")
         }
         speedTextView.setTextColor(color)
     }
